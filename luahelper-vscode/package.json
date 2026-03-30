@@ -32,7 +32,8 @@
         "url": "https://github.com/Tencent/LuaHelper.git"
     },
     "engines": {
-        "vscode": "^1.53.0"
+        "vscode": "^1.53.0",
+        "cursor": "^0.1.0"
     },
     "categories": [
         "Programming Languages",
@@ -775,7 +776,7 @@
     },
     "devDependencies": {
         "@types/mocha": "^7.0.2",
-        "@types/node": "^13.11.1",
+        "@types/node": "^18.0.0",
         "@types/vscode": "^1.53.0",
         "filecopy": "^4.0.2",
         "tslint": "^5.8.0",
@@ -790,6 +791,6 @@
         "vsce": "^1.95.0",
         "vscode-debugadapter": "1.31.0",
         "vscode-debugprotocol": "1.31.0",
-        "vscode-languageclient": "^7.1.0-next.4"
+        "vscode-languageclient": "^8.1.0"
     }
 }

@@ -145,7 +145,7 @@ export class PathManager {
                 }else{
                     // 如果lua文件没有更新，没有传过来oPath，则打开第一个文件
                     for (const element of fullPath) {
-                        if(element.indexOf(shortPath)){
+                        if(typeof element === "string" && element.indexOf(shortPath)){
                             return element; // 这里固定返回第一个元素
                         }
                     }

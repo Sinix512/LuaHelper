@@ -291,8 +291,8 @@ async function doStartServer() {
 
         client = new LanguageClient(LANGUAGE_ID, "luahelper plugin for vscode.", serverOptions, clientOptions);
 
-        savedContext.subscriptions.push(client.start());
-        await client.onReady();
+        await client.start();
+        savedContext.subscriptions.push(client);
     } else {
         let cp: string = "";
         let platform: string = os.platform();
@@ -330,8 +330,8 @@ async function doStartServer() {
         };
 
         client = new LanguageClient(LANGUAGE_ID, "luahelper plugin for vscode.", serverOptions, clientOptions);
-        savedContext.subscriptions.push(client.start());
-        await client.onReady();
+        await client.start();
+        savedContext.subscriptions.push(client);
     }
 
     client.onNotification("luahelper/progressReport", (d: notifications.IProgressReport) => {
