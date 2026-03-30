@@ -111,6 +111,13 @@ func (allProject *AllProject) analysisFirstLuaFile(f *results.FileStruct, luaFil
 	// 第一轮遍历完后，进行这个文件的所有注解解析
 	f.AnnotateFile.AnalysisAllComment(commentMap)
 	f.AnnotateFile.RelateTypeVarInfo(firstFile.GlobalMaps, firstFile.MainFunc.MainScope)
+	if common.GConfig.ClassFuncInferenceFlag {
+		// 将 ---@class X 注解从局部别名（local cls = X）重新绑定到全局变量 X
+		f.AnnotateFile.PropagateClassRelateVarToGlobal(firstFile.GlobalMaps)
+		// 根据 class("Name", Base...) 赋值语句自动合成类型信息（补充或生成 OneClassInfo）
+		// ClassDeclVarList 包含分析阶段收集到的所有 class() 声明（含局部变量容器的情形）
+		f.AnnotateFile.SynthesizeClassFromDecl(firstFile.GlobalMaps, firstFile.ClassDeclVarList)
+	}
 	ftime4 := time.Since(time4).Milliseconds()
 
 	ftime5 := time.Since(time1).Milliseconds()

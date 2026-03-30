@@ -249,7 +249,17 @@ func (a *AllProject) getClassInfoSubMem(classInfo *common.OneClassInfo, strKey s
 		}
 	}
 
-	// todo 这里是否要考虑到引用的信息，参考函数：varInfoHasSubKey
+	// 在当前类及其注解 FieldMap / SubMaps 中均未命中，沿继承链向上查找父类成员。
+	// 父类名来源：---@class Name : Parent1, Parent2 注解中的 ParentNameList。
+	for _, parentName := range classInfo.ClassState.ParentNameList {
+		parentTypeInfo := a.GetAnnClassInfo(parentName)
+		if parentTypeInfo == nil || parentTypeInfo.ClassInfo == nil {
+			continue
+		}
+		if parentSymbol := a.getClassInfoSubMem(parentTypeInfo.ClassInfo, strKey); parentSymbol != nil {
+			return parentSymbol
+		}
+	}
 
 	return
 }
@@ -442,6 +452,41 @@ func (a *AllProject) symbolHasSubKey(oldSymbol *common.Symbol, strKey string,
 	// 如果是非简单的字符串或没有变量信息，直接返回
 	if !simpleStrFlag || oldSymbol.VarInfo == nil {
 		return
+	}
+
+	// 当 AnnotateType 为空，但变量是通过 class("Name",...) 声明的（ClassDeclName 非空），
+	// 尝试直接从 createTypeMap 中查找该类的 OneClassInfo，以支持继承链查找。
+	// 此路径解决：无 ---@class 注解时，父类成员（含继承链）仍可被找到。
+	if common.GConfig.ClassFuncInferenceFlag && oldSymbol.VarInfo.ClassDeclName != "" {
+		if classDeclTypeInfo := a.GetAnnClassInfo(oldSymbol.VarInfo.ClassDeclName); classDeclTypeInfo != nil && classDeclTypeInfo.ClassInfo != nil {
+			if subSymbol := a.getClassInfoSubMem(classDeclTypeInfo.ClassInfo, strKey); subSymbol != nil {
+				return subSymbol
+			}
+		}
+	}
+
+	// self.super 推导：class("Name", ParentClass) 框架中 cls.super = super（父类表），
+	// 因此 self.super 的类型应为第一个父类。
+	if common.GConfig.ClassFuncInferenceFlag && strKey == "super" &&
+		oldSymbol.VarInfo.ClassDeclName != "" {
+		parentName := ""
+		if len(oldSymbol.VarInfo.ClassParentNames) > 0 {
+			parentName = oldSymbol.VarInfo.ClassParentNames[0]
+		} else if classTypeInfo := a.GetAnnClassInfo(oldSymbol.VarInfo.ClassDeclName);
+			classTypeInfo != nil && classTypeInfo.ClassInfo != nil &&
+			len(classTypeInfo.ClassInfo.ClassState.ParentNameList) > 0 {
+			parentName = classTypeInfo.ClassInfo.ClassState.ParentNameList[0]
+		}
+		if parentName != "" {
+			if parentTypeInfo := a.GetAnnClassInfo(parentName);
+				parentTypeInfo != nil && parentTypeInfo.ClassInfo != nil &&
+				parentTypeInfo.ClassInfo.RelateVar != nil {
+				return &common.Symbol{
+					FileName: parentTypeInfo.ClassInfo.LuaFile,
+					VarInfo:  parentTypeInfo.ClassInfo.RelateVar,
+				}
+			}
+		}
 	}
 
 	// 判断这个注解类型是否包含子key
@@ -864,6 +909,37 @@ func (a *AllProject) getFuncRelateSymbol(luaInFile string, node *ast.FuncCallExp
 	}
 
 	if beforeSymbol == nil {
+		// ClassName.new(...) 构造调用：PrefixExp 形如 TableAccessExp{NameExp(X), "new"}，
+		// 其中 X 是通过 class("ClassName") 声明的类，或是指向该类的局部别名（local cls = ClassName）。
+		// new 是框架注入的函数，直接返回类自身的 Symbol 作为调用结果类型。
+		// 注意：必须使用 findStrReferSymbol 而非 FindVarReferSymbol，以避免 findExpList 去重
+		// 导致对同一 NameExp 的二次查找被拦截（getTableAccessRelateSymbol 已插入过该节点）。
+		if common.GConfig.ClassFuncInferenceFlag && node.NameExp == nil {
+			if tableAccess, ok := node.PrefixExp.(*ast.TableAccessExp); ok {
+				if keyStr, ok2 := tableAccess.KeyExp.(*ast.StringExp); ok2 && keyStr.Str == "new" {
+					if nameExp, ok3 := tableAccess.PrefixExp.(*ast.NameExp); ok3 {
+						classSymbol := a.findStrReferSymbol(luaInFile, nameExp.Name, nameExp.Loc,
+							false, comParam, findExpList)
+						if classSymbol != nil && classSymbol.VarInfo != nil {
+							// 情形1：X 本身就是类（ClassName.new()）
+							if classSymbol.VarInfo.ClassDeclName != "" {
+								return classSymbol
+							}
+							// 情形2：X 是局部别名（local cls = ClassName; cls.new()）
+							// 沿 ReferExp 向上一层，用 findStrReferSymbol 绕过 findExpList 去重
+							if referNameExp, ok4 := classSymbol.VarInfo.ReferExp.(*ast.NameExp); ok4 {
+								referSymbol := a.findStrReferSymbol(luaInFile, referNameExp.Name,
+									referNameExp.Loc, false, comParam, findExpList)
+								if referSymbol != nil && referSymbol.VarInfo != nil &&
+									referSymbol.VarInfo.ClassDeclName != "" {
+									return referSymbol
+								}
+							}
+						}
+					}
+				}
+			}
+		}
 		return
 	}
 	funcSymbol := beforeSymbol

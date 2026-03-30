@@ -815,6 +815,24 @@ func (a *Analysis) handleNotNeedDefine(node *ast.AssignStat, findVar *common.Var
 		}
 
 		parentVar.InsertSubMember(strKeyValue, newSubVar)
+
+		// 识别 table.Field = class("Name", Base...) 模式，填充 ClassDeclName / ClassParentNames
+		// 解决：cp.Dialog = class("cp_Dialog", CCSNodePlus) 这种表成员赋值写法
+		if common.GConfig.ClassFuncInferenceFlag && a.isFirstTerm() && nExps >= (i+1) {
+			a.tryExtractClassDecl(newSubVar, node.ExpList[i])
+		}
+
+		// 将子成员同步传播到局部变量所引用的全局变量。
+		// 解决：local cls = Foo; function cls:method() end
+		// 此写法导致 method 只在 cls.SubMaps 中，而 Foo.SubMaps 为空，
+		// 从外部调用 Foo:method() 无法跳转。
+		if common.GConfig.ClassFuncInferenceFlag && a.isFirstTerm() && parentVar == findVar {
+			if nameExp, ok := findVar.ReferExp.(*ast.NameExp); ok {
+				if refGlobalVar, exists := a.curResult.GlobalMaps[nameExp.Name]; exists && refGlobalVar != findVar {
+					refGlobalVar.InsertSubMember(strKeyValue, newSubVar)
+				}
+			}
+		}
 	}
 }
 
@@ -905,9 +923,21 @@ func (a *Analysis) cgAssignStat(node *ast.AssignStat) {
 			// 拷贝过来
 			newVar.SubMaps = tmpVar.SubMaps
 
-			// 插入全局变量
-			a.insertAnalysisGlobalVar(strName, newVar)
-		} else {
+		// 插入全局变量
+		a.insertAnalysisGlobalVar(strName, newVar)
+
+		// 识别 class("Name", Base...) 赋值模式，填充 ClassDeclName / ClassParentNames
+		if common.GConfig.ClassFuncInferenceFlag && a.isFirstTerm() && nExps >= (i+1) {
+			if len(strVec) <= 1 {
+				// 简单全局变量（如 DVShortProgressControl = class(...)）：直接在根变量设置
+				a.tryExtractClassDecl(newVar, node.ExpList[i])
+			} else {
+				// 复合路径（如 cp.Dialog = class(...)）：根变量只是容器，
+				// 通过 handleNotNeedDefine 在正确的子成员上设置 ClassDeclName
+				a.handleNotNeedDefine(node, newVar, strVec, locList, tmpVar, loc, newRefer, newFunc, i)
+			}
+		}
+	} else {
 			strVecLen := len(strVec)
 			if findVar != nil && strVecLen > 0 {
 				a.handleNotNeedDefine(node, findVar, strVec, locList, tmpVar, loc, newRefer, newFunc, i)
@@ -1091,4 +1121,33 @@ func (a *Analysis) cgAssignStat(node *ast.AssignStat) {
 			a.checkAssignTypeSame(node.VarList[i], node.ExpList[i])
 		}
 	}
+}
+
+// tryExtractClassDecl 检测 X = class("Name", Base...) 赋值模式。
+// 若右值是对名为 "class" 的函数的调用，且第一个参数是与变量名相同的字符串字面量，
+// 则将类名写入 ClassDeclName，将后续 NameExp 参数作为父类名写入 ClassParentNames。
+func (a *Analysis) tryExtractClassDecl(varInfo *common.VarInfo, expNode ast.Exp) {
+	callExp, ok := expNode.(*ast.FuncCallExp)
+	if !ok {
+		return
+	}
+	prefixName, ok := callExp.PrefixExp.(*ast.NameExp)
+	if !ok || prefixName.Name != "class" {
+		return
+	}
+	if len(callExp.Args) == 0 {
+		return
+	}
+	firstArg, ok := callExp.Args[0].(*ast.StringExp)
+	if !ok {
+		return
+	}
+	varInfo.ClassDeclName = firstArg.Str
+	for _, arg := range callExp.Args[1:] {
+		if nameExp, ok2 := arg.(*ast.NameExp); ok2 {
+			varInfo.ClassParentNames = append(varInfo.ClassParentNames, nameExp.Name)
+		}
+	}
+	// 无论变量是全局还是局部，都将其加入待合成列表，确保 SynthesizeClassFromDecl 能处理到
+	a.curResult.ClassDeclVarList = append(a.curResult.ClassDeclVarList, varInfo)
 }

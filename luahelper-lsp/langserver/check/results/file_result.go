@@ -45,7 +45,8 @@ type FileResult struct {
 	NodefineMaps map[string]*common.VarInfo // 第一阶段当中，没有定义但是出现的全局变量
 	FuncIDVec    []*common.FuncInfo         // 保存的所有funcInfo信息，可以通过id来查找
 	funcID       int                        // 自增的funcID，默认值为0，每产生一个新的funcID自增1
-	CommentMap   map[int]*lexer.CommentInfo // 第一轮分析时候，保存所有的注释信息, key值为行号
+	CommentMap       map[int]*lexer.CommentInfo // 第一轮分析时候，保存所有的注释信息, key值为行号
+	ClassDeclVarList []*common.VarInfo          // 第一轮分析中，通过 class() 赋值检测到的类声明 VarInfo 列表
 }
 
 // CreateFileResult 创建一个新的文件分析结果
